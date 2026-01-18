@@ -59,11 +59,11 @@ def _(io, pl, pq):
 
 @app.cell
 def _(df, mo):
-    dates = df["period_end_time"].dt.date().unique().sort(descending=True).to_list()
-    selected_date = mo.ui.dropdown(options=dates, value=dates[0])
+    dates = df["period_end_time"].dt.date().unique().sort(descending=True)
+    selected_date = mo.ui.date.from_series(dates.rename("Date"), value=dates[0])
 
     unique_inverters = df["serial_number"].unique().sort().to_list()
-    selected_inverters = mo.ui.multiselect(options=unique_inverters, value=unique_inverters)
+    selected_inverters = mo.ui.multiselect(options=unique_inverters, value=unique_inverters, label="Select inverters")
     return selected_date, selected_inverters
 
 
