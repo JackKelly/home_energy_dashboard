@@ -78,28 +78,31 @@ def _(alt, df, mo, pl, selected_date, selected_inverters):
         .drop(["period_duration"])
     )
 
-    # Create an Altair line plot
     chart = (
         alt.Chart(data_to_plot)
-        .mark_line(point=True, strokeWidth=1)
+        .mark_line(point=True, strokeWidth=2, strokeOpacity=0.7)
         .encode(
-            # X-axis: period_end_time as a temporal scale
-            x=alt.X("period_end_time:T", title="Time", axis=alt.Axis(format="%H:%M")),
-            # Y-axis: calculated watts as a quantitative scale
-            y=alt.Y("watts:Q", title="Power (Watts)").scale(domain=(0, 220)),
-            # Color lines by serial_number to distinguish each micro-inverter
+            x=alt.X("period_end_time:T", title="Time", axis=alt.Axis(format="%H:%M", tickCount=alt.TimeInterval("hour"))),
+            y=alt.Y("watts:Q", title="Power (Watts)", axis=alt.Axis(tickMinStep=50)).scale(domain=(0, 220)),
             color=alt.Color("serial_number:N", title="Micro-inverter Serial Number"),
-            # Add tooltips for interactive data exploration
             tooltip=[
                 alt.Tooltip("period_end_time:T", title="Time", format="%Y-%m-%d %H:%M:%S"),
                 alt.Tooltip("serial_number:N", title="Serial Number"),
                 alt.Tooltip("watts:Q", title="Power (Watts)", format=".2f"),
                 alt.Tooltip("joules_produced:Q", title="Joules Produced"),
-                # Display period_duration in microseconds, as it is in the schema
-                # alt.Tooltip("period_duration", title="Period Duration (µs)")
             ],
         )
-        .properties(title="Power Output (Watts) of Micro-inverters over Time", height=400)
+        .configure_axis(
+            grid=False,
+            domain=False,
+            ticks=True,
+            labelFontSize=12,  # Increases font size (default is ~10)
+            labelPadding=10,  # Adds space between axis and labels
+            titleFontSize=14,  # Increases the "Timestamp" title size
+            titlePadding=15,  # Adds space between label and title
+        )
+        .configure_view(strokeWidth=0)  # Removes the outer frame/box
+        .properties(title="Power Output (Watts) of Micro-inverters over Time", height=600, width="container")
         .interactive()
     )
 
