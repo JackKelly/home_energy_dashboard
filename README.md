@@ -1,5 +1,5 @@
 # home_energy_dashboard
-Visualise my home energy data
+Visualise my home energy data recorded by https://github.com/JackKelly/envoy_recorder
 
 Edit with `uvx marimo edit --sandboxed plot_solar_pv.py`.
 
