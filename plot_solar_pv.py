@@ -107,8 +107,9 @@ def _(alt, df, mo, pl, selected_date, selected_inverters):
         .drop(["period_duration"])
     )
 
-    # Altair doesn't recognise `zoneinfo.ZoneInfo(key='UTC')` as UTC, so we must replace with `timezone.utc`.
-    # And we can't use `astimezone` in WASM.
+    # Altair doesn't recognise `zoneinfo.ZoneInfo(key='UTC')` as UTC.
+    # I've submitted a PR to fix this: https://github.com/vega/altair/pull/3944
+    # And we can't use `astimezone` in WASM because Polars tries to load a library that isn't available.
     x_axis_max_datetime = data_to_plot.select(pl.col("period_end_time").max().dt.replace_time_zone(None)).item()
     MIN_HOUR = 17
     if x_axis_max_datetime.hour < MIN_HOUR:
