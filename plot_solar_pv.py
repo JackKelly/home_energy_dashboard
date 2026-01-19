@@ -22,9 +22,9 @@ def _():
     import polars as pl
     import altair as alt
     import io
-    from datetime import date
+    from datetime import date, datetime, time, timezone
     import pyarrow.parquet as pq
-    return alt, io, mo, pl, pq
+    return alt, date, datetime, io, mo, pl, pq, time, timezone
 
 
 @app.cell
@@ -58,17 +58,56 @@ def _(io, pl, pq):
 
 
 @app.cell
-def _(df, mo):
+def _(date, df, mo):
+    # Date picker
     dates = df["period_end_time"].dt.date().unique().sort(descending=True)
-    selected_date = mo.ui.date.from_series(dates.rename("Date"), value=dates[0])
 
-    unique_inverters = df["serial_number"].unique().sort().to_list()
-    selected_inverters = mo.ui.multiselect(options=unique_inverters, value=unique_inverters, label="Select inverters")
-    return selected_date, selected_inverters
+    query_params = mo.query_params()
+    initial_date_str = query_params.get("date", str(dates[0]))
+
+    try:
+        initial_date = date.fromisoformat(initial_date_str)
+    except ValueError:
+        print("Failed to parse {initial_date_str} as a date")
+        initial_date = dates[0]
+
+
+    def try_to_set_date_param(d: date):
+        # This fails in molab
+        try:
+            query_params.set("date", str(d))
+        except:
+            pass
+
+
+    selected_date = mo.ui.date.from_series(
+        series=dates.rename("Date to plot:"),
+        value=initial_date,
+        on_change=lambda val: try_to_set_date_param(val),
+    )
+    return (selected_date,)
 
 
 @app.cell
-def _(alt, df, mo, pl, selected_date, selected_inverters):
+def _(df, mo):
+    # Pick the inverter(s)
+    unique_inverters = df["serial_number"].unique().sort().to_list()
+    selected_inverters = mo.ui.multiselect(options=unique_inverters, value=unique_inverters, label="Inverters to plot:")
+    return (selected_inverters,)
+
+
+@app.cell
+def _(
+    alt,
+    datetime,
+    df,
+    mo,
+    pl,
+    selected_date,
+    selected_inverters,
+    time,
+    timezone,
+):
     data_to_plot = (
         df.filter(
             pl.col("period_end_time").dt.date() == selected_date.value,
@@ -78,11 +117,20 @@ def _(alt, df, mo, pl, selected_date, selected_inverters):
         .drop(["period_duration"])
     )
 
+
+    x_axis_max_datetime = max(
+        # For some reason, Altair fails to recognise Polar's ZoneInfo("UTC"), so replace it with `timezone.utc`.
+        data_to_plot["period_end_time"].max().astimezone(timezone.utc),
+        datetime.combine(selected_date.value, time(hour=17, tzinfo=timezone.utc)),
+    )
+
     chart = (
         alt.Chart(data_to_plot)
         .mark_line(point=True, strokeWidth=2, strokeOpacity=0.7)
         .encode(
-            x=alt.X("period_end_time:T", title="Time", axis=alt.Axis(format="%H:%M", tickCount=alt.TimeInterval("hour"))),
+            x=alt.X(
+                "period_end_time:T", title="Time", axis=alt.Axis(format="%H:%M", tickCount=alt.TimeInterval("hour"))
+            ).scale(domainMax=x_axis_max_datetime),
             y=alt.Y("watts:Q", title="Power (Watts)", axis=alt.Axis(tickMinStep=50)).scale(domain=(0, 220)),
             color=alt.Color("serial_number:N", title="Micro-inverter Serial Number"),
             tooltip=[
