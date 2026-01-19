@@ -24,7 +24,7 @@ def _():
     import io
     from datetime import date, datetime, time, timezone
     import pyarrow.parquet as pq
-    return alt, date, datetime, io, mo, pl, pq
+    return alt, date, io, mo, pl, pq
 
 
 @app.cell
@@ -146,22 +146,6 @@ def _(alt, df, mo, pl, selected_date, selected_inverters):
     )
 
     mo.vstack([selected_date, selected_inverters, chart])
-    return
-
-
-@app.cell
-def _(alt, datetime):
-    from zoneinfo import ZoneInfo
-
-    data = [{"date": datetime(2025, 1, 1, tzinfo=ZoneInfo("UTC")), "value": 10}]
-
-    # 2. Pass the list directly to the Chart object
-    alt.Chart(alt.Data(values=data)).mark_line(point=True).encode(x="date:T", y="value:Q")
-    return
-
-
-@app.cell
-def _():
     return
 
 
