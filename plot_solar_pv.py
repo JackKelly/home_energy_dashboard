@@ -24,7 +24,7 @@ def _():
     import io
     from datetime import date, datetime, time, timezone
     import pyarrow.parquet as pq
-    return alt, date, datetime, io, mo, pl, pq, time, timezone
+    return alt, date, datetime, io, mo, pl, pq
 
 
 @app.cell
@@ -97,17 +97,7 @@ def _(df, mo):
 
 
 @app.cell
-def _(
-    alt,
-    datetime,
-    df,
-    mo,
-    pl,
-    selected_date,
-    selected_inverters,
-    time,
-    timezone,
-):
+def _(alt, df, mo, pl, selected_date, selected_inverters):
     data_to_plot = (
         df.filter(
             pl.col("period_end_time").dt.date() == selected_date.value,
@@ -117,12 +107,13 @@ def _(
         .drop(["period_duration"])
     )
 
+    # Altair doesn't recognise `zoneinfo.ZoneInfo(key='UTC')` as UTC, so we must replace with `timezone.utc`.
+    # And we can't use `astimezone` in WASM.
+    x_axis_max_datetime = data_to_plot.select(pl.col("period_end_time").max().dt.replace_time_zone(None)).item()
+    MIN_HOUR = 17
+    if x_axis_max_datetime.hour < MIN_HOUR:
+        x_axis_max_datetime = x_axis_max_datetime.replace(hour=MIN_HOUR)
 
-    x_axis_max_datetime = max(
-        # For some reason, Altair fails to recognise Polar's ZoneInfo("UTC"), so replace it with `timezone.utc`.
-        data_to_plot["period_end_time"].max().astimezone(timezone.utc),
-        datetime.combine(selected_date.value, time(hour=17, tzinfo=timezone.utc)),
-    )
 
     chart = (
         alt.Chart(data_to_plot)
@@ -155,6 +146,17 @@ def _(
     )
 
     mo.vstack([selected_date, selected_inverters, chart])
+    return
+
+
+@app.cell
+def _(alt, datetime):
+    from zoneinfo import ZoneInfo
+
+    data = [{"date": datetime(2025, 1, 1, tzinfo=ZoneInfo("UTC")), "value": 10}]
+
+    # 2. Pass the list directly to the Chart object
+    alt.Chart(alt.Data(values=data)).mark_line(point=True).encode(x="date:T", y="value:Q")
     return
 
 
