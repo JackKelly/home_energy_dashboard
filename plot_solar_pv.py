@@ -5,6 +5,7 @@
 #     "marimo>=0.19.4",
 #     "polars==1.37.1",
 #     "pyarrow==23.0.0",
+#     "pydantic-ai==1.44.0",
 #     "pyodide-http==0.2.2",
 #     "requests==2.32.5",
 # ]
@@ -24,7 +25,9 @@ def _():
     import io
     from datetime import date, datetime, time, timezone
     import pyarrow.parquet as pq
-    return alt, date, io, mo, pl, pq
+    from enum import StrEnum, auto
+    from typing import NamedTuple
+    return NamedTuple, StrEnum, alt, auto, date, io, mo, pl, pq
 
 
 @app.cell
@@ -89,22 +92,67 @@ def _(date, df, mo):
 
 
 @app.cell
-def _(df, mo):
-    # Pick the inverter(s)
-    unique_inverters = df["serial_number"].unique().sort().to_list()
-    selected_inverters = mo.ui.multiselect(options=unique_inverters, value=unique_inverters, label="Inverters to plot:")
-    return (selected_inverters,)
+def _(NamedTuple, StrEnum, auto, mo):
+    # Pick inverters
+
+
+    class Azimuth(StrEnum):
+        SE = auto()
+        SW = auto()
+        NW = auto()
+
+
+    class Inverter(NamedTuple):
+        id: int
+        serial_number: str
+        azimuth: Azimuth
+        desc: str
+        color: str
+
+        def __repr__(self) -> str:
+            return f"{self.azimuth.upper()} ({self.desc})"
+
+
+    inverters = [
+        # South east:
+        Inverter(1, "482202080061", Azimuth.SE, "top NE", "#4682B4"),
+        Inverter(2, "482202080196", Azimuth.SE, "bottom SW", "#6495ED"),
+        Inverter(3, "482202080253", Azimuth.SE, "bottom middle", "#1E90FF"),
+        Inverter(4, "482202079929", Azimuth.SE, "bottom NE", "#87CEFA"),
+        # South west:
+        Inverter(5, "482202079973", Azimuth.SW, "top middle landscape", "#2E8B57"),
+        Inverter(6, "482202080024", Azimuth.SW, "bottom SE", "#008000"),
+        Inverter(7, "482202079731", Azimuth.SW, "bottom middle", "#3CB371"),
+        Inverter(8, "482202079726", Azimuth.SW, "bottom NW", "#90EE90"),
+        # North west:
+        Inverter(9, "482202079737", Azimuth.NW, "upper NE?", "#FFA07A"),
+        Inverter(10, "482202080303", Azimuth.NW, "lower SW?", "#FF6347"),
+    ]
+
+    selected_inverters = mo.ui.multiselect(options=inverters, value=inverters, label="Inverters to plot:")
+    return inverters, selected_inverters
 
 
 @app.cell
-def _(alt, df, mo, pl, selected_date, selected_inverters):
+def _():
+    return
+
+
+@app.cell
+def _(alt, df, inverters, mo, pl, selected_date, selected_inverters):
     data_to_plot = (
         df.filter(
             pl.col("period_end_time").dt.date() == selected_date.value,
-            pl.col("serial_number").is_in(selected_inverters.value),
+            pl.col("serial_number").is_in([inverter.serial_number for inverter in selected_inverters.value]),
         )
         .with_columns((pl.col("joules_produced") / pl.col("period_duration").dt.total_seconds()).alias("watts"))
         .drop(["period_duration"])
+        .join(
+            pl.DataFrame(inverters)
+            .cast({"serial_number": pl.Categorical})
+            .hstack(pl.Series(name="label", values=[str(inverter) for inverter in inverters]).to_frame()),
+            on="serial_number",
+        )
     )
 
     # Altair doesn't recognise `zoneinfo.ZoneInfo(key='UTC')` as UTC.
@@ -118,18 +166,29 @@ def _(alt, df, mo, pl, selected_date, selected_inverters):
 
     chart = (
         alt.Chart(data_to_plot)
-        .mark_line(point=True, strokeWidth=2, strokeOpacity=0.7)
+        .mark_line(
+            point=True,
+            strokeWidth=2,
+            strokeOpacity=0.7,
+            interpolate="monotone",
+        )
         .encode(
             x=alt.X(
                 "period_end_time:T", title="Time", axis=alt.Axis(format="%H:%M", tickCount=alt.TimeInterval("hour"))
             ).scale(domainMax=x_axis_max_datetime),
             y=alt.Y("watts:Q", title="Power (Watts)", axis=alt.Axis(tickMinStep=50)).scale(domain=(0, 220)),
-            color=alt.Color("serial_number:N", title="Micro-inverter Serial Number"),
+            color=alt.Color(
+                "label:N",
+                title="Inverter",
+                scale=alt.Scale(
+                    domain=[str(inverter) for inverter in selected_inverters.value],
+                    range=[inverter.color for inverter in selected_inverters.value],
+                ),
+            ),
             tooltip=[
                 alt.Tooltip("period_end_time:T", title="Time", format="%Y-%m-%d %H:%M:%S"),
-                alt.Tooltip("serial_number:N", title="Serial Number"),
+                alt.Tooltip("label:N", title="Label"),
                 alt.Tooltip("watts:Q", title="Power (Watts)", format=".2f"),
-                alt.Tooltip("joules_produced:Q", title="Joules Produced"),
             ],
         )
         .configure_axis(
@@ -147,6 +206,11 @@ def _(alt, df, mo, pl, selected_date, selected_inverters):
     )
 
     mo.vstack([selected_date, selected_inverters, chart])
+    return
+
+
+@app.cell
+def _():
     return
 
 
