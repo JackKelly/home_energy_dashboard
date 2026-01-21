@@ -50,13 +50,27 @@ def _():
 
 
 @app.cell
-def _(Final, io, pl, pq, requests):
-    url: Final[str] = (
+def _(Final):
+    PARQUET_URL: Final[str] = (
         "https://data.jack-kelly.com/home-energy-data/solar-pv/year=2026/month=1/00000000.parquet"
     )
+    return (PARQUET_URL,)
+
+
+@app.cell
+def _(mo):
+    # Load new data regularly
+    refresh = mo.ui.refresh(default_interval="5m")
+    return (refresh,)
+
+
+@app.cell
+def _(PARQUET_URL: "Final[str]", io, pl, pq, refresh, requests):
+    # Just referencing `refresh` will cause this cell to refresh if refresh is shown in the UI.
+    refresh
 
     # As of Jan 2026, Polars WASM can't directly read Parquet over the network, so we use requests after patching
-    response = requests.get(url)
+    response = requests.get(PARQUET_URL)
     response.raise_for_status()
 
     table = pq.read_table(io.BytesIO(response.content))
@@ -73,14 +87,13 @@ def _(date, df, mo):
     # Create a state to hold the current date
     get_date_state, set_date_state = mo.state(latest_available_date)
 
+    # Read date from app URL
     query_params = mo.query_params()
     if query_params_date_str := query_params.get("date"):
         try:
             query_params_date = date.fromisoformat(query_params_date_str)
         except ValueError:
-            print(
-                f"Failed to parse {query_params_date_str=} as a date. Using latest date instead."
-            )
+            print(f"Failed to parse {query_params_date_str=} as a date.")
         else:
             if dates[-1] <= query_params_date <= dates[0]:
                 set_date_state(query_params_date)
@@ -97,6 +110,7 @@ def _(date, df, mo):
 
 @app.cell
 def _(date, get_date_state, query_params, set_date_state, timedelta):
+    # Helper functions for the date picker UI elements
     def set_date(new_date: date):
         set_date_state(new_date)
         try:
@@ -143,17 +157,17 @@ def _(get_date_state, latest_available_date, mo, shift_day):
 
 
 @app.cell
-def _(get_date_state, latest_available_date, mo, set_date):
+def _(date, get_date_state, mo, set_date):
     today_button = mo.ui.button(
         label="Today",
-        on_click=lambda _: set_date(latest_available_date),
-        disabled=get_date_state() == latest_available_date,
+        on_click=lambda _: set_date(date.today()),
+        disabled=get_date_state() == date.today(),
     )
     return (today_button,)
 
 
 @app.cell
-def _(NamedTuple, StrEnum, auto, mo):
+def _(NamedTuple, StrEnum, auto, mo, pl):
     # Pick inverters
 
     class Azimuth(StrEnum):
@@ -162,16 +176,16 @@ def _(NamedTuple, StrEnum, auto, mo):
         NW = auto()
 
     class Inverter(NamedTuple):
-        id: int
+        id: int  # My own ID. Just to help keep the inverters in a semantic order.
         serial_number: str
         azimuth: Azimuth
-        desc: str
+        description: str
         color: str
 
         def __repr__(self) -> str:
-            return f"{self.azimuth.upper()} ({self.desc})"
+            return f"{self.azimuth.upper()} ({self.description})"
 
-    inverters = [
+    all_inverters = [
         # South east:
         Inverter(1, "482202080061", Azimuth.SE, "top NE", "#4682B4"),
         Inverter(2, "482202080196", Azimuth.SE, "bottom SW", "#6495ED"),
@@ -187,27 +201,40 @@ def _(NamedTuple, StrEnum, auto, mo):
         Inverter(10, "482202080303", Azimuth.NW, "lower SW?", "#FF6347"),
     ]
 
-    selected_inverters_multiselect = mo.ui.multiselect(
-        options=inverters, value=inverters, label="Inverters to plot:"
+    multiselect_inverters = mo.ui.multiselect(
+        options=all_inverters, value=all_inverters, label="Inverters to plot:"
     )
-    return inverters, selected_inverters_multiselect
+
+    all_inverters_df = (
+        pl.DataFrame(all_inverters)
+        .cast({"serial_number": pl.Categorical})
+        .hstack(
+            pl.Series(
+                name="label", values=[str(inverter) for inverter in all_inverters]
+            ).to_frame()
+        )
+    )
+    return all_inverters_df, multiselect_inverters
 
 
 @app.cell
 def _(
+    all_inverters_df,
     alt,
+    date,
     date_picker,
     df,
     get_date_state,
-    inverters,
+    latest_available_date,
     mo,
+    multiselect_inverters,
     next_day_button,
     pl,
     prev_day_button,
-    selected_inverters_multiselect,
+    refresh,
     today_button,
 ):
-    selected_inverters = sorted(si for si in selected_inverters_multiselect.value)
+    selected_inverters = sorted(si for si in multiselect_inverters.value)
 
     data_to_plot = (
         df.filter(
@@ -221,21 +248,13 @@ def _(
                 pl.col("joules_produced") / pl.col("period_duration").dt.total_seconds()
             ).alias("watts")
         )
-        .drop(["period_duration"])
-        .join(
-            pl.DataFrame(inverters)
-            .cast({"serial_number": pl.Categorical})
-            .hstack(
-                pl.Series(
-                    name="label", values=[str(inverter) for inverter in inverters]
-                ).to_frame()
-            ),
-            on="serial_number",
-        )
+        .drop(["period_duration"])  # Altair doesn't like the timedelta type.
+        .join(all_inverters_df, on="serial_number")
     )
 
     # Altair doesn't recognise `zoneinfo.ZoneInfo(key='UTC')` as UTC.
-    # I've submitted a PR to fix this: https://github.com/vega/altair/pull/3944
+    # My PR to fix this has been merged: https://github.com/vega/altair/pull/3944
+    # TODO(Jack): When Altair is next released, we can get rid of `replace_time_zone(None)`.
     # And we can't use `astimezone` in WASM because Polars tries to load a library that isn't available.
     x_axis_max_datetime = data_to_plot.select(
         pl.col("period_end_time").max().dt.replace_time_zone(None)
@@ -295,20 +314,29 @@ def _(
         .interactive()
     )
 
-    mo.vstack(
+    date_selector_ui_elements = [prev_day_button, date_picker, next_day_button]
+
+    # Only show the "today" button if today is in the data:
+    if latest_available_date == date.today():
+        date_selector_ui_elements.append(today_button)
+
+    top_row = mo.hstack(
         [
-            mo.hstack(
-                [
-                    mo.hstack(
-                        [prev_day_button, date_picker, next_day_button, today_button],
-                        justify="start",
-                    ),
-                    selected_inverters_multiselect,
-                ]
-            ),
-            chart,
+            mo.hstack(date_selector_ui_elements, justify="start"),
         ]
+        # Only refresh if we're showing today:
+        + ([refresh] if get_date_state() == date.today() else [])
+        + [
+            multiselect_inverters,
+        ],
     )
+
+    mo.vstack([top_row, chart])
+    return
+
+
+@app.cell
+def _():
     return
 
 
