@@ -2,7 +2,7 @@
 # requires-python = ">=3.14"
 # dependencies = [
 #     "altair==6.0.0",
-#     "marimo>=0.19.4",
+#     "marimo>=0.19.7",
 #     "polars==1.37.1",
 #     "pyarrow==23.0.0",
 #     "pyodide-http==0.2.2",
