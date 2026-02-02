@@ -7,12 +7,13 @@
 #     "pyarrow==23.0.0",
 #     "pyodide-http==0.2.2",
 #     "requests==2.32.5",
+#     "urlpath==2.0.0",
 # ]
 # ///
 
 import marimo
 
-__generated_with = "0.19.4"
+__generated_with = "0.19.7"
 app = marimo.App(width="full")
 
 
@@ -28,15 +29,18 @@ def _():
     import polars as pl
     import pyarrow.parquet as pq
     import pyodide_http
+    from urlpath import URL
 
     pyodide_http.patch_all()
 
     import requests
-
+    from requests.exceptions import HTTPError
     return (
         Final,
+        HTTPError,
         NamedTuple,
         StrEnum,
+        URL,
         alt,
         auto,
         date,
@@ -50,11 +54,40 @@ def _():
 
 
 @app.cell
-def _(Final):
-    PARQUET_URL: Final[str] = (
-        "https://data.jack-kelly.com/home-energy-data/solar-pv/year=2026/month=1/00000000.parquet"
-    )
-    return (PARQUET_URL,)
+def _(Final, URL, date, io, pl, pq, requests):
+    def load_parquet_for_month(d: date) -> pl.DataFrame:
+        base_parquet_url: Final[URL] = URL("https://data.jack-kelly.com/home-energy-data/solar-pv/")
+        parquet_url = base_parquet_url / f"year={d.year}" / f"month={d.month}" / "00000000.parquet"
+        print("Attempting to load", parquet_url, "...")
+        # As of Jan 2026, Polars WASM can't directly read Parquet over the network, so we use requests after `pyodide_http.patch_all()`
+        response = requests.get(parquet_url)
+        response.raise_for_status()
+        table = pq.read_table(io.BytesIO(response.content))
+        df = pl.from_arrow(table)
+        print("Successfully loaded", parquet_url)
+        return df
+    return (load_parquet_for_month,)
+
+
+@app.cell
+def _(Final, HTTPError, date, datetime, load_parquet_for_month, pl):
+    def load_archive() -> pl.DataFrame:
+        start_date: Final[datetime] = date(2026, 1, 1)
+        months = pl.date_range(start=start_date, end=date.today(), interval="1mo", eager=True)
+        dfs = [pl.DataFrame()]
+        for month in months[:-1]:
+            try:
+                dfs.append(load_parquet_for_month(month))
+            except HTTPError as e:
+                if e.response.status_code == 404:
+                    print("Skipping missing parquet:", e.request.url)
+                else:
+                    raise
+        return pl.concat(dfs, how="vertical")
+
+
+    archive_df = load_archive()
+    return (archive_df,)
 
 
 @app.cell
@@ -65,16 +98,12 @@ def _(mo):
 
 
 @app.cell
-def _(PARQUET_URL: "Final[str]", io, pl, pq, refresh, requests):
+def _(archive_df, date, load_parquet_for_month, pl, refresh):
     # Just referencing `refresh` will cause this cell to refresh if refresh is shown in the UI.
     refresh
 
-    # As of Jan 2026, Polars WASM can't directly read Parquet over the network, so we use requests after patching
-    response = requests.get(PARQUET_URL)
-    response.raise_for_status()
-
-    table = pq.read_table(io.BytesIO(response.content))
-    df = pl.from_arrow(table)
+    _df_of_this_months_data = load_parquet_for_month(date.today())
+    df = pl.concat([archive_df, _df_of_this_months_data], how="vertical")
     return (df,)
 
 
@@ -118,10 +147,10 @@ def _(date, get_date_state, query_params, set_date_state, timedelta):
         except:
             print("Failed to set date in query_params")
 
+
     def shift_day(delta):
         new_date = get_date_state() + timedelta(days=delta)
         set_date(new_date)
-
     return set_date, shift_day
 
 
@@ -170,10 +199,12 @@ def _(date, get_date_state, mo, set_date):
 def _(NamedTuple, StrEnum, auto, mo, pl):
     # Pick inverters
 
+
     class Azimuth(StrEnum):
         SE = auto()
         SW = auto()
         NW = auto()
+
 
     class Inverter(NamedTuple):
         id: int  # My own ID. Just to help keep the inverters in a semantic order.
@@ -184,6 +215,7 @@ def _(NamedTuple, StrEnum, auto, mo, pl):
 
         def __repr__(self) -> str:
             return f"{self.azimuth.upper()} ({self.description})"
+
 
     all_inverters = [
         # South east:
@@ -201,18 +233,12 @@ def _(NamedTuple, StrEnum, auto, mo, pl):
         Inverter(10, "482202080303", Azimuth.NW, "lower SW?", "#FF6347"),
     ]
 
-    multiselect_inverters = mo.ui.multiselect(
-        options=all_inverters, value=all_inverters, label="Inverters to plot:"
-    )
+    multiselect_inverters = mo.ui.multiselect(options=all_inverters, value=all_inverters, label="Inverters to plot:")
 
     all_inverters_df = (
         pl.DataFrame(all_inverters)
         .cast({"serial_number": pl.Categorical})
-        .hstack(
-            pl.Series(
-                name="label", values=[str(inverter) for inverter in all_inverters]
-            ).to_frame()
-        )
+        .hstack(pl.Series(name="label", values=[str(inverter) for inverter in all_inverters]).to_frame())
     )
     return all_inverters_df, multiselect_inverters
 
@@ -239,15 +265,9 @@ def _(
     data_to_plot = (
         df.filter(
             pl.col("period_end_time").dt.date() == get_date_state(),
-            pl.col("serial_number").is_in(
-                [inverter.serial_number for inverter in selected_inverters]
-            ),
+            pl.col("serial_number").is_in([inverter.serial_number for inverter in selected_inverters]),
         )
-        .with_columns(
-            (
-                pl.col("joules_produced") / pl.col("period_duration").dt.total_seconds()
-            ).alias("watts")
-        )
+        .with_columns((pl.col("joules_produced") / pl.col("period_duration").dt.total_seconds()).alias("watts"))
         .drop(["period_duration"])  # Altair doesn't like the timedelta type.
         .join(all_inverters_df, on="serial_number")
     )
@@ -256,9 +276,7 @@ def _(
     # My PR to fix this has been merged: https://github.com/vega/altair/pull/3944
     # TODO(Jack): When Altair is next released, we can get rid of `replace_time_zone(None)`.
     # And we can't use `astimezone` in WASM because Polars tries to load a library that isn't available.
-    x_axis_max_datetime = data_to_plot.select(
-        pl.col("period_end_time").max().dt.replace_time_zone(None)
-    ).item()
+    x_axis_max_datetime = data_to_plot.select(pl.col("period_end_time").max().dt.replace_time_zone(None)).item()
     MIN_HOUR = 17
     if x_axis_max_datetime.hour < MIN_HOUR:
         x_axis_max_datetime = x_axis_max_datetime.replace(hour=MIN_HOUR)
@@ -277,9 +295,7 @@ def _(
                 title=f"{get_date_state()}",
                 axis=alt.Axis(format="%H:%M", tickCount=alt.TimeInterval("hour")),
             ).scale(domainMax=x_axis_max_datetime),
-            y=alt.Y(
-                "watts:Q", title="Power (Watts)", axis=alt.Axis(tickMinStep=50)
-            ).scale(domain=(0, 220)),
+            y=alt.Y("watts:Q", title="Power (Watts)", axis=alt.Axis(tickMinStep=50)).scale(domain=(0, 220)),
             color=alt.Color(
                 "label:N",
                 title="Inverter",
@@ -289,9 +305,7 @@ def _(
                 ),
             ),
             tooltip=[
-                alt.Tooltip(
-                    "period_end_time:T", title="Time", format="%Y-%m-%d %H:%M:%S"
-                ),
+                alt.Tooltip("period_end_time:T", title="Time", format="%Y-%m-%d %H:%M:%S"),
                 alt.Tooltip("label:N", title="Label"),
                 alt.Tooltip("watts:Q", title="Watts", format=".2f"),
             ],
@@ -332,11 +346,6 @@ def _(
     )
 
     mo.vstack([top_row, chart])
-    return
-
-
-@app.cell
-def _():
     return
 
 
