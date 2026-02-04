@@ -3,7 +3,7 @@
 # dependencies = [
 #     "altair==6.0.0",
 #     "marimo>=0.19.7",
-#     "polars==1.37.1",
+#     "polars==1.38.0",
 #     "pyarrow==23.0.0",
 #     "pyodide-http==0.2.2",
 #     "requests==2.32.5",
@@ -295,7 +295,9 @@ def _(
                 title=f"{get_date_state()}",
                 axis=alt.Axis(format="%H:%M", tickCount=alt.TimeInterval("hour")),
             ).scale(domainMax=x_axis_max_datetime),
-            y=alt.Y("watts:Q", title="Power (Watts)", axis=alt.Axis(tickMinStep=50)).scale(domain=(0, 220)),
+            y=alt.Y("watts:Q", title="Power (Watts)", axis=alt.Axis(tickMinStep=50)).scale(
+                domain=(0, 250)
+            ),  # Our inverters' max continuous output is 290 VA.
             color=alt.Color(
                 "label:N",
                 title="Inverter",
