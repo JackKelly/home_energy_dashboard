@@ -20,7 +20,7 @@ app = marimo.App(width="full")
 @app.cell
 def _():
     import io
-    from datetime import date, timedelta
+    from datetime import date, datetime, time, timedelta
     from enum import StrEnum, auto
     from typing import Final, NamedTuple
 
@@ -44,11 +44,13 @@ def _():
         alt,
         auto,
         date,
+        datetime,
         io,
         mo,
         pl,
         pq,
         requests,
+        time,
         timedelta,
     )
 
@@ -249,6 +251,7 @@ def _(
     alt,
     date,
     date_picker,
+    datetime,
     df,
     get_date_state,
     latest_available_date,
@@ -258,6 +261,7 @@ def _(
     pl,
     prev_day_button,
     refresh,
+    time,
     today_button,
 ):
     selected_inverters = sorted(si for si in multiselect_inverters.value)
@@ -272,14 +276,7 @@ def _(
         .join(all_inverters_df, on="serial_number")
     )
 
-    # Altair doesn't recognise `zoneinfo.ZoneInfo(key='UTC')` as UTC.
-    # My PR to fix this has been merged: https://github.com/vega/altair/pull/3944
-    # TODO(Jack): When Altair is next released, we can get rid of `replace_time_zone(None)`.
-    # And we can't use `astimezone` in WASM because Polars tries to load a library that isn't available.
-    x_axis_max_datetime = data_to_plot.select(pl.col("period_end_time").max().dt.replace_time_zone(None)).item()
-    MIN_HOUR = 17
-    if x_axis_max_datetime.hour < MIN_HOUR:
-        x_axis_max_datetime = x_axis_max_datetime.replace(hour=MIN_HOUR)
+    midnight = datetime.combine(get_date_state(), time(hour=0))
 
     chart = (
         alt.Chart(data_to_plot)
@@ -294,7 +291,10 @@ def _(
                 "period_end_time:T",
                 title=f"{get_date_state()}",
                 axis=alt.Axis(format="%H:%M", tickCount=alt.TimeInterval("hour")),
-            ).scale(domainMax=x_axis_max_datetime),
+            ).scale(
+                domainMin=midnight.replace(hour=7, minute=30),
+                domainMax=midnight.replace(hour=17, minute=0),
+            ),
             y=alt.Y("watts:Q", title="Power (Watts)", axis=alt.Axis(tickMinStep=50)).scale(
                 domain=(0, 250)
             ),  # Our inverters' max continuous output is 290 VA.
@@ -348,6 +348,11 @@ def _(
     )
 
     mo.vstack([top_row, chart])
+    return
+
+
+@app.cell
+def _():
     return
 
 
