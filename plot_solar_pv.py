@@ -3,8 +3,8 @@
 # dependencies = [
 #     "altair==6.0.0",
 #     "marimo>=0.19.7",
-#     "polars==1.38.0",
-#     "pyarrow==23.0.0",
+#     "polars==1.38.1",
+#     "pyarrow==23.0.1",
 #     "pyodide-http==0.2.2",
 #     "requests==2.32.5",
 #     "urlpath==2.0.0",
@@ -13,7 +13,7 @@
 
 import marimo
 
-__generated_with = "0.19.7"
+__generated_with = "0.20.2"
 app = marimo.App(width="full")
 
 
@@ -35,6 +35,7 @@ def _():
 
     import requests
     from requests.exceptions import HTTPError
+
     return (
         Final,
         HTTPError,
@@ -68,6 +69,7 @@ def _(Final, URL, date, io, pl, pq, requests):
         df = pl.from_arrow(table)
         print("Successfully loaded", parquet_url)
         return df
+
     return (load_parquet_for_month,)
 
 
@@ -153,6 +155,7 @@ def _(date, get_date_state, query_params, set_date_state, timedelta):
     def shift_day(delta):
         new_date = get_date_state() + timedelta(days=delta)
         set_date(new_date)
+
     return set_date, shift_day
 
 
@@ -292,11 +295,11 @@ def _(
                 title=f"{get_date_state()}",
                 axis=alt.Axis(format="%H:%M", tickCount=alt.TimeInterval("hour")),
             ).scale(
-                domainMin=midnight.replace(hour=7, minute=30),
-                domainMax=midnight.replace(hour=17, minute=0),
+                domainMin=midnight.replace(hour=7, minute=0),
+                domainMax=midnight.replace(hour=17, minute=30),
             ),
             y=alt.Y("watts:Q", title="Power (Watts)", axis=alt.Axis(tickMinStep=50)).scale(
-                domain=(0, 250)
+                domain=(0, 280)
             ),  # Our inverters' max continuous output is 290 VA.
             color=alt.Color(
                 "label:N",
