@@ -295,12 +295,12 @@ def _(
                 title=f"{get_date_state()}",
                 axis=alt.Axis(format="%H:%M", tickCount=alt.TimeInterval("hour")),
             ).scale(
-                domainMin=midnight.replace(hour=7, minute=0),
-                domainMax=midnight.replace(hour=17, minute=30),
+                domainMin=midnight.replace(hour=6, minute=0),
+                domainMax=midnight.replace(hour=19, minute=0),
             ),
             y=alt.Y("watts:Q", title="Power (Watts)", axis=alt.Axis(tickMinStep=50)).scale(
-                domain=(0, 280)
-            ),  # Our inverters' max continuous output is 290 VA.
+                domain=(0, 300)
+            ),  # Our inverters' max continuous output is 290 VA, but I've seen it go to 296.
             color=alt.Color(
                 "label:N",
                 title="Inverter",
