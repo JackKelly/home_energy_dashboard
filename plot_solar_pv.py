@@ -3,17 +3,17 @@
 # dependencies = [
 #     "altair==6.0.0",
 #     "marimo>=0.19.7",
-#     "polars==1.38.1",
+#     "polars==1.39.3",
 #     "pyarrow==23.0.1",
 #     "pyodide-http==0.2.2",
-#     "requests==2.32.5",
+#     "requests==2.33.0",
 #     "urlpath==2.0.0",
 # ]
 # ///
 
 import marimo
 
-__generated_with = "0.20.2"
+__generated_with = "0.21.1"
 app = marimo.App(width="full")
 
 
